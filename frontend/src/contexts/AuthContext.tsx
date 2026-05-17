@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { USE_SPRING_BOOT, SPRING_API_BASE_URL } from '@/config/backend';
+import { setAuthToken } from '@/services/api';
 
 interface AuthContextType {
   user: User | null;
@@ -13,6 +14,38 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+async function readResponseBody<T = any>(res: Response): Promise<T> {
+  const text = await res.text();
+  if (!text.trim()) return {} as T;
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return { message: text } as T;
+  }
+}
+
+async function extractErrorMessage(res: Response, fallback: string): Promise<string> {
+  const body = await readResponseBody<any>(res);
+  if (body?.message || body?.error) {
+    return body.message || body.error;
+  }
+
+  if (res.status === 401 || res.status === 403) {
+    return 'Invalid email or password';
+  }
+
+  if (res.status === 409) {
+    return 'An account with that email or username already exists';
+  }
+
+  if (res.status === 400) {
+    return 'Please check your input and try again';
+  }
+
+  return fallback;
+}
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -28,8 +61,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         fetch(`${SPRING_API_BASE_URL}/auth/me`, {
           headers: { Authorization: `Bearer ${token}` },
         })
-          .then((res) => res.json())
+          .then(async (res) => {
+            const userData = await readResponseBody<any>(res);
+            if (!res.ok) {
+              throw new Error(userData.message || "Invalid token");
+            }
+            return userData;
+          })
           .then((userData) => {
+            setAuthToken(token);
             setUser({
               id: userData.id,
               email: userData.email,
@@ -37,8 +77,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             } as any);
           })
           .catch(() => {
-            localStorage.removeItem("token");
-            localStorage.removeItem("spring_jwt_token");
+            setAuthToken(null);
           })
           .finally(() => setLoading(false));
       } else {
@@ -70,12 +109,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         body: JSON.stringify({ email, password, username }),
       });
       if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || "Registration failed");
+        throw new Error(await extractErrorMessage(res, "Registration failed"));
       }
-      const data = await res.json();
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("spring_jwt_token", data.token);
+      const data = await readResponseBody<any>(res);
+      setAuthToken(data.token);
       setUser({
         id: data.user.id,
         email: data.user.email,
@@ -102,12 +139,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         body: JSON.stringify({ email, password }),
       });
       if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.message || "Login failed");
+        throw new Error(await extractErrorMessage(res, "Login failed"));
       }
-      const data = await res.json();
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("spring_jwt_token", data.token);
+      const data = await readResponseBody<any>(res);
+      setAuthToken(data.token);
       setUser({
         id: data.user.id,
         email: data.user.email,
@@ -132,8 +167,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           // Ignore logout network issues and clear local session anyway.
         }
       }
-      localStorage.removeItem("token");
-      localStorage.removeItem("spring_jwt_token");
+      setAuthToken(null);
       setUser(null);
     } else {
       const { error } = await supabase.auth.signOut();

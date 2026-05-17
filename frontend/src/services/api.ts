@@ -67,8 +67,27 @@ export async function request<T>(endpoint: string, options: RequestOptions = {})
   }
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: "Request failed" }));
-    throw new Error(error.message || `HTTP ${response.status}`);
+      const text = await response.text();
+      let message = "Request failed";
+
+      if (text.trim()) {
+        try {
+          const error = JSON.parse(text);
+          message = error.message || error.error || text;
+        } catch {
+          message = text;
+        }
+      }
+
+      if ((response.status === 401 || response.status === 403) && message === "Request failed") {
+        message = "Invalid email or password";
+      }
+
+      if (response.status === 409 && message === "Request failed") {
+        message = "An account with that email or username already exists";
+      }
+
+      throw new Error(message || `HTTP ${response.status}`);
   }
 
   if (response.status === 204) return {} as T;

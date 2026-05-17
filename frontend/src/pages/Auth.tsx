@@ -17,12 +17,19 @@ const Auth = () => {
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
   const { signIn, signUp } = useAuth();
   const navigate = useNavigate();
+
+  const switchMode = (loginMode: boolean) => {
+    setIsLogin(loginMode);
+    setErrorMessage('');
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setErrorMessage('');
     try {
       if (isLogin) {
         await signIn(email, password);
@@ -33,7 +40,15 @@ const Auth = () => {
         toast.success('Account created! Check your email to verify.');
       }
     } catch (err: any) {
-      toast.error(err.message || 'Something went wrong');
+      const message = err?.message || 'Something went wrong';
+      if (!isLogin && /already exists|already in use|duplicate/i.test(message)) {
+        setErrorMessage(`${message}. If you already have an account, switch to Sign in.`);
+      } else if (isLogin && /invalid email or password|invalid credentials/i.test(message)) {
+        setErrorMessage(`${message}. If you do not have an account yet, switch to Create Account.`);
+      } else {
+        setErrorMessage(message);
+      }
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -92,10 +107,22 @@ const Auth = () => {
               {isLogin ? 'Welcome back' : 'Create account'}
             </CardTitle>
             <CardDescription className="text-muted-foreground">
-              {isLogin ? 'Sign in to continue your DSA journey' : 'Start your DSA preparation today'}
+              {isLogin
+                ? 'Sign in to continue your DSA journey.'
+                : 'Create a new account only if you do not already have one.'}
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {errorMessage && (
+              <div className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                {errorMessage}
+              </div>
+            )}
+            <div className="mb-4 rounded-md border border-border/70 bg-secondary/40 px-4 py-3 text-sm text-muted-foreground">
+              {isLogin
+                ? 'You are in Sign in mode. Use this to log into an existing account.'
+                : 'You are in Create Account mode. If you already have an account, click Sign in below.'}
+            </div>
             <form onSubmit={handleSubmit} className="space-y-4">
               {!isLogin && (
                 <div className="space-y-2 animate-fade-in">
@@ -175,7 +202,7 @@ const Auth = () => {
             <div className="mt-6 text-center text-sm text-muted-foreground">
               {isLogin ? "Don't have an account?" : 'Already have an account?'}{' '}
               <button
-                onClick={() => setIsLogin(!isLogin)}
+                onClick={() => switchMode(!isLogin)}
                 className="font-medium text-primary hover:underline transition-colors"
               >
                 {isLogin ? 'Sign up' : 'Sign in'}
